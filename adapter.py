@@ -9,39 +9,18 @@ from logutils import get_logger
 
 logger = get_logger(__name__)
 
-"""
-Developer Guide - Protocol Adapter Template
 
-Purpose:
----------
-This file serves as a template for creating platform-specific protocol adapters 
-that implement a defined communication protocol, such as OAuth2.
+class MastodonOAuth2Adapter(OAuth2ProtocolInterface):
+    """Adapter for integrating Mastodon's OAuth2 protocol."""
 
-Usage:
-------
-To implement a new protocol adapter:
-1. Choose the appropriate protocol interface (e.g., OAuth2ProtocolInterface).
-2. Create a new class following the naming convention: <PlatformName><Protocol>Adapter.
-   Example: GmailOAuth2Adapter
-3. Subclass the selected protocol interface.
-4. Implement all abstract methods defined in the interface.
-5. Add any necessary platform-specific logic or configuration handling.
+    def get_authorization_url(self, **kwargs):
+        return super().get_authorization_url(**kwargs)
 
-Notes:
-------
-- The protocol interface provides `.manifest` and `.config` attributes for accessing 
-    adapter metadata and settings.
+    def exchange_code_and_fetch_user_info(self, code, **kwargs):
+        return super().exchange_code_and_fetch_user_info(code, **kwargs)
 
-Example:
---------
-See the sample `GmailOAuth2Adapter` class below.
-"""
+    def revoke_token(self, token, **kwargs):
+        return super().revoke_token(token, **kwargs)
 
-
-class GmailOAuth2Adapter(OAuth2ProtocolInterface):
-    """
-    Sample implementation of a Gmail adapter using the OAuth2 protocol.
-    Use this class as a reference for building custom platform adapters.
-    """
-
-    # TODO: Implement required methods defined in OAuth2ProtocolInterface
+    def send_message(self, token, message, **kwargs):
+        return super().send_message(token, message, **kwargs)
