@@ -4,11 +4,10 @@ of the GNU General Public License, v. 3.0. If a copy of the GNU General
 Public License was not distributed with this file, see <https://www.gnu.org/licenses/>.
 """
 
-import os
-import base64
 import json
 import click
-from adapter import MastodonOAuth2Adapter
+from protocol_interfaces import BaseProtocolInterface
+from adapter import MastodonOAuth2Adapter, save_credentials, register_client
 
 
 def print_table(title, data: dict):
@@ -26,9 +25,43 @@ def cli():
     """Mastodon OAuth2 Adapter CLI."""
 
 
+@cli.command("register")
+@click.option("-n", "--name", required=False, help="Client application name")
+@click.option(
+    "-r", "--redirect-uris", required=False, help="Redirect URIs (space-separated)"
+)
+@click.option("-w", "--website", default=None, help="Client website URL")
+def register(name, redirect_uris, website):
+    """Register a new client application with a Mastodon server."""
+
+    if not name:
+        name = click.prompt("Client application name", type=str)
+
+    if not redirect_uris:
+        redirect_uris = click.prompt("Redirect URIs (space-separated)", type=str)
+
+    try:
+        credentials = register_client(
+            client_name=name, redirect_uris=redirect_uris, website=website
+        )
+
+        adapter = BaseProtocolInterface()
+
+        save_credentials(adapter.config, credentials)
+        print_table("Client Registration Successful", credentials)
+
+    except Exception as err:
+        print("Registration failed:", err)
+        print(f"Registration failed: {err}")
+
+
 @cli.command("auth-url")
 @click.option(
-    "-p", "--pkce", is_flag=True, default=True, help="Auto-generate PKCE code verifier."
+    "-p",
+    "--pkce",
+    is_flag=True,
+    default=False,
+    help="Auto-generate PKCE code verifier.",
 )
 @click.option("-r", "--redirect", default=None, help="Redirect URI.")
 @click.option("-s", "--state", default=None, help="OAuth2 state parameter.")
@@ -36,14 +69,11 @@ def cli():
 def auth_url(pkce, redirect, state, output):
     """Get the OAuth2 authorization URL."""
     adapter = MastodonOAuth2Adapter()
-    request_identifier = base64.b64encode(os.urandom(32)).decode("utf-8")
     result = adapter.get_authorization_url(
         autogenerate_code_verifier=pkce,
         redirect_url=redirect,
         state=state,
-        request_identifier=request_identifier,
     )
-    result["request_identifier"] = request_identifier
     print_table("Authorization URL Result", result)
     if output:
         with open(output, "w", encoding="utf-8") as f:
@@ -109,7 +139,7 @@ def exchange(code, verifier, redirect, output, input_file):
     "-o", "--output", default=None, help="File to save refreshed token if different."
 )
 def send_message(token_file, message, output):
-    """Send a message using the Bluesky OAuth2 Adapter."""
+    """Send a message using the Mastodon OAuth2 Adapter."""
     try:
         with open(token_file, "r", encoding="utf-8") as f:
             token = json.load(f).get("token")
@@ -140,6 +170,44 @@ def send_message(token_file, message, output):
             print(f"Refreshed token saved to {output}")
     except Exception as err:
         print(f"Failed to send message: {err}")
+
+
+@cli.command("revoke")
+@click.option("-f", "--token-file", required=True, help="File containing token JSON.")
+@click.option(
+    "-o", "--output", default=None, help="File to update after token revocation."
+)
+def revoke(token_file, output):
+    """Revoke the OAuth2 token."""
+    try:
+        with open(token_file, "r", encoding="utf-8") as f:
+            token = json.load(f).get("token")
+            if not token:
+                print(f"Token key not found in {token_file}.")
+                return
+    except FileNotFoundError:
+        print(f"Token file {token_file} not found.")
+        return
+
+    adapter = MastodonOAuth2Adapter()
+    try:
+        result = adapter.revoke_token(token=token)
+        print_table("Revoke Token Result", {"success": result})
+
+        if output:
+            try:
+                with open(output, "r", encoding="utf-8") as f:
+                    existing_data = json.load(f)
+            except FileNotFoundError:
+                existing_data = {}
+
+            existing_data.pop("token", None)
+
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump(existing_data, f, indent=2)
+            print(f"Token removed from {output}")
+    except Exception as err:
+        print(f"Failed to revoke token: {err}")
 
 
 if __name__ == "__main__":

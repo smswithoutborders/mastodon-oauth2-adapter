@@ -41,44 +41,67 @@ sudo apt install build-essential python3-dev
 
 ## Configuration
 
-1. **Host your client metadata JSON document:**  
-   Every atproto OAuth client must publish a client metadata JSON document on a publicly accessible URL.
+### Step 1: Register Your Client Application
 
-   - The `client_id` is the full `https://` URL where this JSON document is hosted.
-   - For more details, see the [atproto OAuth client documentation](https://docs.bsky.app/docs/advanced-guides/oauth-client#client-and-server-metadata).
+You can register a new client application using the CLI's `register` command. This creates an OAuth2 application on your Mastodon server.
 
-2. **Configure the credentials file path:**
-   - In your `config.ini`, set the path to your `credentials.json` file as shown below:
-
-```ini
-   [credentials]
-   path = ./credentials.json
+```bash
+python3 mastodon_cli.py register \
+  -n "My Mastodon Client" \
+  -r "https://example.com/callback/ https://localhost:8080/callback/" \
+  -w "https://example.com"
 ```
 
-3. **Create your `credentials.json` file:**
-   - This file should contain your client metadata.
-   - Below is an example of what your `credentials.json` might look like:
+**Command Options:**
 
-**Sample `credentials.json`**
+- `-n, --name`: Client application name
+- `-r, --redirect-uris`: Redirect URIs (space-separated)
+- `-w, --website`: Client website URL (optional)
+
+> [!NOTE]
+>
+> The registration command automatically saves your client credentials to `credentials.json` in the project directory.
+
+#### Generated `credentials.json`
+
+After successful registration, you'll get a `credentials.json` file with your client credentials:
 
 ```json
 {
-  "client_id": "https://app.example.com/oauth/client-metadata.json",
-  "application_type": "web",
-  "client_name": "Demo Mastodon OAuth2 Adapter.",
-  "client_uri": "https://app.example.com",
-  "dpop_bound_access_tokens": true,
-  "grant_types": ["authorization_code", "refresh_token"],
-  "redirect_uris": ["https://app.example.com/oauth/callback"],
-  "response_types": ["code"],
-  "scope": "atproto transition:generic",
-  "token_endpoint_auth_method": "none"
+  "id": "12345",
+  "name": "My Mastodon Client",
+  "website": "https://example.com",
+  "scopes": ["profile", "write:statuses"],
+  "redirect_uris": ["https://example.com/callback/"],
+  "vapid_key": "BM4h...XYZ",
+  "redirect_uri": "https://example.com/callback/",
+  "client_id": "abcd1234efgh5678",
+  "client_secret": "wxyz9876abcd1234efgh5678ijkl9012",
+  "client_secret_expires_at": 0
 }
 ```
 
-> [!TIP]
->
-> If you are developing on localhost, OAuth2 authorization servers require HTTPS protocol for redirect URIs. You can use tools like [ngrok](https://ngrok.com/), [localtunnel](https://github.com/localtunnel/localtunnel), or [VS Code tunnel](https://code.visualstudio.com/docs/remote/tunnels) to tunnel your localhost to an HTTPS alternative.
+**Field Descriptions:**
+
+- `id`: Unique identifier for your registered application
+- `name`: The display name of your application
+- `website`: Your application's website URL
+- `scopes`: OAuth2 scopes your application can request (profile access and posting statuses)
+- `redirect_uris`: Array of authorized redirect URLs for OAuth2 callbacks
+- `vapid_key`: Vapid key for push notifications (if applicable)
+- `redirect_uri`: Primary redirect URI (usually the first in `redirect_uris`)
+- `client_id`: Your application's unique client identifier
+- `client_secret`: Secret key for authenticating your application (keep this secure!)
+- `client_secret_expires_at`: Expiration timestamp for the client secret (0 means no expiration)
+
+### Step 2: Configure the Credentials File Path
+
+Create or edit the `config.ini` file to specify the path to your credentials file:
+
+```ini
+[credentials]
+path = ./credentials.json
+```
 
 ## Using the CLI
 
@@ -120,6 +143,17 @@ python3 mastodon_cli.py send-message -f session.json -m "Hello, Mastodon!" -o se
 - `-m`: Message to send.
 - `-o`: Save the output to `session.json`.
 
-## TODO
+### 4. **Revoke Token**
 
-- Support additional PDS providers beyond just https://bsky.social
+Use the `revoke` command to revoke the OAuth2 token and invalidate the user's session.
+
+```bash
+python3 mastodon_cli.py revoke -f session.json -o session.json
+```
+
+- `-f`: Read token from `session.json`.
+- `-o`: Update the file by removing the revoked token.
+
+> [!WARNING]
+>
+> After revoking a token, the user will need to re-authenticate to use the adapter again. The revoked token will be removed from the output file if specified.
