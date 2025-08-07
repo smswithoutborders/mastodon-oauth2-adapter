@@ -9,6 +9,7 @@ import json
 from typing import Dict, Any
 import requests
 from authlib.integrations.requests_client import OAuth2Session
+from authlib.integrations.base_client import OAuthError
 from authlib.common.security import generate_token
 from protocol_interfaces import OAuth2ProtocolInterface
 from logutils import get_logger
@@ -21,7 +22,7 @@ DEFAULT_CONFIG = {
         "register_uri": "https://mastodon.social/api/v1/apps",
         "auth_uri": "https://mastodon.social/oauth/authorize",
         "token_uri": "https://mastodon.social/oauth/token",
-        "userinfo_uri": "https://mastodon.social/api/v1/accounts/verify_credentials",
+        "userinfo_uri": "https://mastodon.social/oauth/userinfo",
         "send_message_uri": "https://mastodon.social/api/v1/statuses",
         "revoke_uri": "https://mastodon.social/oauth/revoke",
     },
@@ -152,10 +153,84 @@ class MastodonOAuth2Adapter(OAuth2ProtocolInterface):
         }
 
     def exchange_code_and_fetch_user_info(self, code, **kwargs):
-        return super().exchange_code_and_fetch_user_info(code, **kwargs)
+        redirect_url = kwargs.pop("redirect_url", None)
+
+        if redirect_url:
+            self.session.redirect_uri = redirect_url
+
+        try:
+            token_response = self.session.fetch_token(
+                self.default_config["urls"]["token_uri"], code=code, **kwargs
+            )
+
+            logger.debug("Token response: %s", token_response)
+            logger.info("Access token fetched successfully.")
+
+            if not token_response.get("refresh_token"):
+                logger.warning("No refresh token received.")
+                token_response["refresh_token"] = token_response.get("access_token")
+
+            fetched_scopes = set(token_response.get("scope", "").split())
+            expected_scopes = set(self.default_config["params"]["scope"])
+
+            if not expected_scopes.issubset(fetched_scopes):
+                raise ValueError(
+                    f"Invalid token: Scopes do not match. Expected: {expected_scopes}, "
+                    f"Received: {fetched_scopes}"
+                )
+
+            userinfo_response = self.session.get(
+                self.default_config["urls"]["userinfo_uri"]
+            ).json()
+            userinfo = {
+                "account_identifier": userinfo_response.get("preferred_username"),
+                "name": userinfo_response.get("name"),
+            }
+            logger.info("User information fetched successfully.")
+
+            return {"token": token_response, "userinfo": userinfo}
+        except OAuthError as e:
+            logger.error("Failed to fetch token or user info: %s", e)
+            raise
 
     def revoke_token(self, token, **kwargs):
-        return super().revoke_token(token, **kwargs)
+        self.session.token = token
+        try:
+            response = self.session.revoke_token(
+                self.default_config["urls"]["revoke_uri"],
+                token_type_hint="access_token",
+            )
+
+            if not response.ok:
+                raise RuntimeError(response.text)
+            response.raise_for_status()
+
+            logger.info("Token revoked successfully.")
+            return True
+        except OAuthError as e:
+            logger.error("Failed to revoke tokens: %s", e)
+            raise
 
     def send_message(self, token, message, **kwargs):
-        return super().send_message(token, message, **kwargs)
+        self.session.token = token
+        url = self.default_config["urls"]["send_message_uri"]
+        status_data = {"status": message}
+
+        logger.debug("Sending status data: %s", status_data)
+
+        try:
+            response = self.session.post(url, json=status_data)
+
+            if not response.ok:
+                raise RuntimeError(response.text)
+            response.raise_for_status()
+
+            logger.info("Successfully sent message.")
+            return {"success": True, "refreshed_token": self.session.token}
+        except requests.exceptions.HTTPError as e:
+            logger.error("Failed to send message: %s", e)
+            return {
+                "success": False,
+                "message": e.response.text,
+                "refreshed_token": self.session.token,
+            }
