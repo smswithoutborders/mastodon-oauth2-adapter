@@ -6,6 +6,8 @@ Public License was not distributed with this file, see <https://www.gnu.org/lice
 
 import os
 import json
+import math
+import textwrap
 from typing import Dict, Any
 import requests
 from authlib.integrations.requests_client import OAuth2Session
@@ -15,6 +17,8 @@ from protocol_interfaces import OAuth2ProtocolInterface
 from logutils import get_logger
 
 logger = get_logger(__name__)
+
+MASTODON_CHARACTER_LIMIT = 500
 
 DEFAULT_CONFIG = {
     "urls": {
@@ -103,6 +107,23 @@ def register_client(client_name, redirect_uris, website=None):
     except requests.exceptions.RequestException as e:
         logger.exception("Failed to register client: %s", e)
         raise
+
+
+def split_message_into_chunks(
+    message: str, max_length: int = MASTODON_CHARACTER_LIMIT
+) -> list:
+    """Split a message into chunks that fit within Mastodon's character limit."""
+    message_length = len(message)
+    if message_length <= max_length:
+        return [message]
+
+    # Account for thread indicator like " (1/3)" - reserve 10 chars
+    effective_max_length = max_length - 10
+
+    threads_required = math.ceil(message_length / effective_max_length)
+    chars_per_thread = math.ceil(message_length / threads_required)
+
+    return textwrap.wrap(message, chars_per_thread, break_long_words=False)
 
 
 class MastodonOAuth2Adapter(OAuth2ProtocolInterface):
@@ -214,18 +235,38 @@ class MastodonOAuth2Adapter(OAuth2ProtocolInterface):
     def send_message(self, token, message, **kwargs):
         self.session.token = token
         url = self.default_config["urls"]["send_message_uri"]
-        status_data = {"status": message}
 
-        logger.debug("Sending status data: %s", status_data)
+        message_chunks = split_message_into_chunks(message)
 
         try:
-            response = self.session.post(url, json=status_data)
+            thread_posts = []
+            parent_post_id = None
 
-            if not response.ok:
-                raise RuntimeError(response.text)
-            response.raise_for_status()
+            for i, chunk in enumerate(message_chunks):
+                if len(message_chunks) > 1:
+                    thread_text = f"{chunk} ({i+1}/{len(message_chunks)})"
+                else:
+                    thread_text = chunk
 
-            logger.info("Successfully sent message.")
+                status_data = {"status": thread_text}
+
+                if parent_post_id:
+                    status_data["in_reply_to_id"] = parent_post_id
+
+                logger.debug("Sending status data: %s", status_data)
+
+                response = self.session.post(url, json=status_data)
+
+                if not response.ok:
+                    raise RuntimeError(response.text)
+                response.raise_for_status()
+
+                post_data = response.json()
+                thread_posts.append(post_data)
+
+                parent_post_id = post_data.get("id")
+
+            logger.info("Successfully sent message with %d posts.", len(thread_posts))
             return {"success": True, "refreshed_token": self.session.token}
         except requests.exceptions.HTTPError as e:
             logger.error("Failed to send message: %s", e)
