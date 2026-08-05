@@ -1,145 +1,87 @@
-"""
-This program is free software: you can redistribute it under the terms
-of the GNU General Public License, v. 3.0. If a copy of the GNU General
-Public License was not distributed with this file, see <https://www.gnu.org/licenses/>.
-"""
+# SPDX-License-Identifier: GPL-3.0-only
 
-import os
-import json
+import base64
 import math
 import textwrap
-from typing import Dict, Any
+from dataclasses import dataclass
+from typing import Any, Dict, List
+
 import requests
-from authlib.integrations.requests_client import OAuth2Session
-from authlib.integrations.base_client import OAuthError
 from authlib.common.security import generate_token
-from protocol_interfaces import OAuth2ProtocolInterface
+from authlib.integrations.base_client import OAuthError
+from authlib.integrations.requests_client import OAuth2Session
+
+from config import Credentials, load_credentials
 from logutils import get_logger
+from protocol_interfaces import OAuth2ProtocolInterface
+from utils import require
 
 logger = get_logger(__name__)
 
-MASTODON_CHARACTER_LIMIT = 500
-
-DEFAULT_CONFIG = {
-    "urls": {
-        "base_url": "https://mastodon.social",
-        "register_uri": "https://mastodon.social/api/v1/apps",
-        "auth_uri": "https://mastodon.social/oauth/authorize",
-        "token_uri": "https://mastodon.social/oauth/token",
-        "userinfo_uri": "https://mastodon.social/oauth/userinfo",
-        "send_message_uri": "https://mastodon.social/api/v1/statuses",
-        "revoke_uri": "https://mastodon.social/oauth/revoke",
-    },
-    "params": {
-        "scope": ["profile", "write:statuses"],
-        "response_type": "code",
-    },
-}
+MAX_MEDIA_ATTACHMENTS = 4
 
 
-def load_credentials(configs: Dict[str, Any]) -> Dict[str, str]:
-    """Load OAuth2 credentials from a specified configuration."""
-
-    creds_config = configs.get("credentials", {})
-    creds_path = os.path.expanduser(creds_config.get("path", ""))
-    if not creds_path:
-        raise ValueError("Missing 'credentials.path' in configuration.")
-    if not os.path.isabs(creds_path):
-        creds_path = os.path.join(os.path.dirname(__file__), creds_path)
-
-    logger.debug("Loading credentials from %s", creds_path)
-    with open(creds_path, encoding="utf-8") as f:
-        creds = json.load(f)
-
-    return {
-        "client_id": creds["client_id"],
-        "client_secret": creds["client_secret"],
-        "redirect_uri": creds["redirect_uris"][0],
-    }
+class AttachmentError(Exception):
+    """Raised when an attachment cannot be uploaded or attached to a status."""
 
 
-def save_credentials(configs: Dict[str, Any], credentials: Dict[str, Any]):
-    """Save credentials to the credentials.json file."""
-
-    creds_config = configs.get("credentials", {})
-    creds_path = os.path.expanduser(creds_config.get("path", ""))
-    if not creds_path:
-        raise ValueError("Missing 'credentials.path' in configuration.")
-    if not os.path.isabs(creds_path):
-        creds_path = os.path.join(os.path.dirname(__file__), creds_path)
-
-    logger.info("Saving credentials to: %s", creds_path)
-
-    with open(creds_path, "w", encoding="utf-8") as f:
-        json.dump(credentials, f, indent=2)
-
-    logger.info("Credentials saved successfully")
+class MastodonAPIError(Exception):
+    """Raised when the Mastodon API returns an error response."""
 
 
-def register_client(client_name, redirect_uris, website=None):
-    """
-    Register a new client application with a Mastodon server.
-    """
-    register_uri = DEFAULT_CONFIG["urls"]["register_uri"]
+@dataclass
+class Attachment:
+    data: bytes
+    filename: str
+    mimetype: str
 
-    logger.info("Registering client with server: %s", register_uri)
 
-    registration_data = {
-        "client_name": client_name,
-        "redirect_uris": redirect_uris,
-        "scopes": " ".join(DEFAULT_CONFIG["params"]["scope"]),
-    }
-
-    if website:
-        registration_data["website"] = website
-
+def _extract_error(response: requests.Response) -> str:
     try:
-        response = requests.post(register_uri, data=registration_data, timeout=30)
+        return response.json().get("error") or response.text
+    except Exception:
+        return response.text or f"HTTP {response.status_code}"
+
+
+def _handle_response(response: requests.Response) -> Any:
+    """Raise a clean MastodonAPIError on failure, otherwise return the parsed body."""
+    try:
         response.raise_for_status()
-
-        result = response.json()
-
-        logger.debug("Client registration response: %s", result)
-
-        logger.info("Client registration successful")
-        return result
-
+    except requests.exceptions.HTTPError:
+        raise MastodonAPIError(_extract_error(response)) from None
     except requests.exceptions.RequestException as e:
-        logger.exception("Failed to register client: %s", e)
-        raise
+        raise MastodonAPIError(str(e)) from e
+
+    return response.json() if response.content else {}
 
 
 def split_message_into_chunks(
-    message: str, max_length: int = MASTODON_CHARACTER_LIMIT
-) -> list:
+    message: str, max_length: int, suffix_reserve: int
+) -> List[str]:
     """Split a message into chunks that fit within Mastodon's character limit."""
-    message_length = len(message)
-    if message_length <= max_length:
+    if len(message) <= max_length:
         return [message]
 
-    # Account for thread indicator like " (1/3)" - reserve 10 chars
-    effective_max_length = max_length - 10
-
-    threads_required = math.ceil(message_length / effective_max_length)
-    chars_per_thread = math.ceil(message_length / threads_required)
+    effective_max_length = max_length - suffix_reserve
+    threads_required = math.ceil(len(message) / effective_max_length)
+    chars_per_thread = math.ceil(len(message) / threads_required)
 
     return textwrap.wrap(message, chars_per_thread, break_long_words=False)
 
 
 class MastodonOAuth2Adapter(OAuth2ProtocolInterface):
-    """Adapter for integrating Mastodon's OAuth2 protocol."""
+    """Adapter integrating Mastodon's OAuth2 protocol with RelaySMS."""
 
     def __init__(self):
-        self.default_config = DEFAULT_CONFIG
-        self.credentials = load_credentials(self.config)
+        self.credentials: Credentials = load_credentials(self.config)
         self.session = OAuth2Session(
-            client_id=self.credentials["client_id"],
-            client_secret=self.credentials["client_secret"],
-            redirect_uri=self.credentials["redirect_uri"],
-            token_endpoint=self.default_config["urls"]["token_uri"],
+            client_id=self.credentials.CLIENT_ID,
+            client_secret=self.credentials.CLIENT_SECRET,
+            redirect_uri=self.credentials.redirect_uri,
+            token_endpoint=self.credentials.token_uri,
         )
 
-    def get_authorization_url(self, **kwargs):
+    def get_authorization_url(self, **kwargs) -> Dict[str, Any]:
         code_verifier = kwargs.get("code_verifier")
         autogenerate_code_verifier = kwargs.pop("autogenerate_code_verifier", False)
         redirect_url = kwargs.pop("redirect_url", None)
@@ -156,10 +98,14 @@ class MastodonOAuth2Adapter(OAuth2ProtocolInterface):
         if redirect_url:
             self.session.redirect_uri = redirect_url
 
-        params = {**self.default_config["params"], **kwargs}
+        params = {
+            "scope": " ".join(self.credentials.SCOPE),
+            "response_type": "code",
+            **kwargs,
+        }
 
         authorization_url, state = self.session.create_authorization_url(
-            self.default_config["urls"]["auth_uri"], **params
+            self.credentials.auth_uri, **params
         )
 
         logger.debug("Authorization URL generated: %s", authorization_url)
@@ -168,12 +114,14 @@ class MastodonOAuth2Adapter(OAuth2ProtocolInterface):
             "authorization_url": authorization_url,
             "state": state,
             "code_verifier": code_verifier,
-            "client_id": self.credentials["client_id"],
-            "scope": ",".join(self.default_config["params"]["scope"]),
+            "client_id": self.credentials.CLIENT_ID,
+            "scope": ",".join(self.credentials.SCOPE),
             "redirect_uri": self.session.redirect_uri,
         }
 
-    def exchange_code_and_fetch_user_info(self, code, **kwargs):
+    def exchange_code_and_fetch_user_info(
+        self, code: str, **kwargs
+    ) -> Dict[str, Dict[str, Any]]:
         redirect_url = kwargs.pop("redirect_url", None)
 
         if redirect_url:
@@ -181,7 +129,7 @@ class MastodonOAuth2Adapter(OAuth2ProtocolInterface):
 
         try:
             token_response = self.session.fetch_token(
-                self.default_config["urls"]["token_uri"], code=code, **kwargs
+                self.credentials.token_uri, code=code, **kwargs
             )
 
             logger.debug("Token response: %s", token_response)
@@ -192,7 +140,7 @@ class MastodonOAuth2Adapter(OAuth2ProtocolInterface):
                 token_response["refresh_token"] = token_response.get("access_token")
 
             fetched_scopes = set(token_response.get("scope", "").split())
-            expected_scopes = set(self.default_config["params"]["scope"])
+            expected_scopes = set(self.credentials.SCOPE)
 
             if not expected_scopes.issubset(fetched_scopes):
                 raise ValueError(
@@ -200,9 +148,9 @@ class MastodonOAuth2Adapter(OAuth2ProtocolInterface):
                     f"Received: {fetched_scopes}"
                 )
 
-            userinfo_response = self.session.get(
-                self.default_config["urls"]["userinfo_uri"]
-            ).json()
+            userinfo_response = _handle_response(
+                self.session.get(self.credentials.userinfo_uri)
+            )
             userinfo = {
                 "account_identifier": userinfo_response.get("preferred_username"),
                 "name": userinfo_response.get("name"),
@@ -210,68 +158,119 @@ class MastodonOAuth2Adapter(OAuth2ProtocolInterface):
             logger.info("User information fetched successfully.")
 
             return {"token": token_response, "userinfo": userinfo}
-        except OAuthError as e:
+        except (OAuthError, MastodonAPIError) as e:
             logger.error("Failed to fetch token or user info: %s", e)
             raise
 
-    def revoke_token(self, token, **kwargs):
+    def revoke_token(self, token: Dict[str, str], **_) -> bool:
         self.session.token = token
         try:
             response = self.session.revoke_token(
-                self.default_config["urls"]["revoke_uri"],
-                token_type_hint="access_token",
+                self.credentials.revoke_uri, token_type_hint="access_token"
             )
-
-            if not response.ok:
-                raise RuntimeError(response.text)
-            response.raise_for_status()
+            _handle_response(response)
 
             logger.info("Token revoked successfully.")
             return True
-        except OAuthError as e:
+        except (OAuthError, MastodonAPIError) as e:
             logger.error("Failed to revoke tokens: %s", e)
             raise
 
-    def send_message(self, token, message, **kwargs):
-        self.session.token = token
-        url = self.default_config["urls"]["send_message_uri"]
+    def _upload_media(self, attachment: Attachment) -> str:
+        """Upload a single attachment and return its Mastodon media id."""
+        files = {
+            "file": (
+                attachment.filename,
+                attachment.data,
+                attachment.mimetype or "application/octet-stream",
+            )
+        }
+        response = self.session.post(self.credentials.media_uri, files=files)
+        try:
+            media = _handle_response(response)
+        except MastodonAPIError as e:
+            raise AttachmentError(
+                f"Failed to upload attachment '{attachment.filename}': {e}"
+            ) from e
 
-        message_chunks = split_message_into_chunks(message)
+        media_id = media.get("id")
+        if not media_id:
+            raise AttachmentError(
+                f"No media id returned for attachment '{attachment.filename}'."
+            )
+        return media_id
+
+    def send_message(self, token: Dict[str, str], **kwargs) -> Dict[str, Any]:
+        (message,) = require(kwargs, "message")
+
+        processed_attachments: List[Attachment] = []
+        for idx, att_dict in enumerate(kwargs.get("attachments") or []):
+            filename = att_dict.get("filename") or f"attachment_{idx}"
+            try:
+                processed_attachments.append(
+                    Attachment(
+                        data=base64.b64decode(att_dict.get("data", ""), validate=True),
+                        filename=filename,
+                        mimetype=att_dict.get("mimetype") or "",
+                    )
+                )
+            except Exception as exc:
+                raise ValueError(f"Invalid attachment data in '{filename}'.") from exc
+
+        if len(processed_attachments) > MAX_MEDIA_ATTACHMENTS:
+            raise AttachmentError(
+                f"Mastodon statuses support at most {MAX_MEDIA_ATTACHMENTS} media "
+                f"attachments, got {len(processed_attachments)}."
+            )
+
+        self.session.token = token
+        url = self.credentials.send_message_uri
+        message_chunks = split_message_into_chunks(
+            message,
+            self.credentials.CHARACTER_LIMIT,
+            self.credentials.THREAD_SUFFIX_RESERVE,
+        )
 
         try:
+            media_ids = [self._upload_media(a) for a in processed_attachments]
+
             thread_posts = []
             parent_post_id = None
 
             for i, chunk in enumerate(message_chunks):
-                if len(message_chunks) > 1:
-                    thread_text = f"{chunk} ({i+1}/{len(message_chunks)})"
-                else:
-                    thread_text = chunk
-
+                thread_text = (
+                    f"{chunk} ({i + 1}/{len(message_chunks)})"
+                    if len(message_chunks) > 1
+                    else chunk
+                )
                 status_data = {"status": thread_text}
 
                 if parent_post_id:
                     status_data["in_reply_to_id"] = parent_post_id
+                if i == 0 and media_ids:
+                    status_data["media_ids"] = media_ids
 
                 logger.debug("Sending status data: %s", status_data)
 
                 response = self.session.post(url, json=status_data)
-
-                if not response.ok:
-                    raise RuntimeError(response.text)
-                response.raise_for_status()
-
-                post_data = response.json()
+                post_data = _handle_response(response)
                 thread_posts.append(post_data)
 
                 parent_post_id = post_data.get("id")
 
-            logger.info("Successfully sent message with %d posts.", len(thread_posts))
+            logger.info("Successfully sent message with %d post(s).", len(thread_posts))
             return {"success": True, "refreshed_token": self.session.token}
-        except requests.exceptions.HTTPError as e:
+        except MastodonAPIError as e:
             logger.error("Failed to send message: %s", e)
             return {
                 "success": False,
-                "message": e.response.text,
+                "message": str(e),
+                "refreshed_token": self.session.token,
+            }
+        except AttachmentError as e:
+            logger.error("Failed to attach media: %s", e)
+            return {
+                "success": False,
+                "message": str(e),
                 "refreshed_token": self.session.token,
             }
