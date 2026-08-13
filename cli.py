@@ -5,7 +5,7 @@ adapter's runtime OAuth2 interface, namely registering a client application
 with a Mastodon server.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import click
 import requests
@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 
 def register_client(
     client_name: str,
-    redirect_uris: str,
+    redirect_uris: List[str],
     website: Optional[str] = None,
     base_url: str = DEFAULT_BASE_URL,
 ) -> Dict[str, Any]:
@@ -38,7 +38,7 @@ def register_client(
         registration_data["website"] = website
 
     try:
-        response = requests.post(register_uri, data=registration_data, timeout=30)
+        response = requests.post(register_uri, json=registration_data, timeout=30)
         response.raise_for_status()
 
         result = response.json()
@@ -116,7 +116,7 @@ def register(name, redirect_uris, website, base_url, interactive):
     try:
         credentials = register_client(
             client_name=name,
-            redirect_uris=redirect_uris,
+            redirect_uris=redirect_uris.split(),
             website=website,
             base_url=base_url,
         )
