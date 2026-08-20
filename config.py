@@ -10,7 +10,7 @@ from logutils import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_BASE_URL = "https://mastodon.social"
-DEFAULT_SCOPE = ["profile", "write:statuses"]
+DEFAULT_SCOPE = ["profile", "write:statuses", "write:media"]
 DEFAULT_CHARACTER_LIMIT = 500
 DEFAULT_THREAD_SUFFIX_RESERVE = 10
 
