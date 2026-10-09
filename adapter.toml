@@ -1,0 +1,10 @@
+entry = "mastodon_oauth2_adapter:MastodonAdapter"
+name = "mastodon"
+display_name = "Mastodon"
+protocol = "oauth2"
+category = "text"
+offline_first = false
+
+[icons]
+svg = "https://raw.githubusercontent.com/smswithoutborders/mastodon-oauth2-adapter/main/icons/mastodon.svg"
+png = "https://raw.githubusercontent.com/smswithoutborders/mastodon-oauth2-adapter/main/icons/mastodon.png"
