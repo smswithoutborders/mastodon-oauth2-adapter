@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mastodon-oauth2-adapter"
+version = "1.0.0"
+description = "Mastodon adapter for the RelaySMS Publisher"
+readme = "README.md"
+license = "GPL-3.0-only"
+requires-python = ">=3.12"
+authors = [{ name = "Aisatou Musa", email = "sashaaysha77@gmail.com" }]
+dependencies = [
+  "Authlib==1.6.12",
+  "requests==2.33.0",
+  "relaysms-adapter-sdk @ git+https://github.com/smswithoutborders/RelaySMS-Publisher@sdk-v1.0.0#subdirectory=sdk",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+  "responses==0.26.3",
+  "relaysms-adapter-sdk[console] @ git+https://github.com/smswithoutborders/RelaySMS-Publisher@sdk-v1.0.0#subdirectory=sdk",
+]
+
+[project.scripts]
+mastodon-register = "mastodon_oauth2_adapter.register:main"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
