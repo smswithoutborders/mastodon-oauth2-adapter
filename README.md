@@ -4,11 +4,10 @@ Lets [RelaySMS Publisher](https://github.com/smswithoutborders/RelaySMS-Publishe
 
 ## Credentials
 
-Register the client application with the Mastodon server once. `mastodon-register` writes `credentials.json` to `RELAYSMS_ADAPTER_CONFIG_DIR`, which on the Publisher is `data/platforms/config/<adapter id>/`.
+Register the client application with the Mastodon server once, from the Publisher's install directory. `mastodon-register` writes `credentials.json` to the adapter's config directory.
 
 ```bash
-RELAYSMS_ADAPTER_CONFIG_DIR=data/platforms/config/<adapter id> \
-  venv/bin/mastodon-register --name RelaySMS \
+./publisher.sh platforms exec mastodon -- mastodon-register --name RelaySMS \
   --redirect-uri https://example.com/callback --base-url https://mastodon.social
 ```
 
