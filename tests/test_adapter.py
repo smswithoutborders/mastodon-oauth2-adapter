@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 import json
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+import requests
 import responses
 from relaysms_adapter_sdk import (
     Account,
@@ -16,12 +18,14 @@ from relaysms_adapter_sdk import (
     RateLimitedError,
     RevokeRequest,
     SendRequest,
+    SetupRequest,
     TokenInvalidError,
     UpstreamError,
+    manifest,
 )
 from relaysms_adapter_sdk.paths import CONFIG_DIR_ENV, STATE_DIR_ENV
 
-from mastodon_oauth2_adapter import MastodonAdapter, register
+from mastodon_oauth2_adapter import MastodonAdapter
 from mastodon_oauth2_adapter.adapter import CHARACTER_LIMIT, split_message
 
 BASE = "https://social.example"
@@ -161,18 +165,57 @@ def test_split_message_fits_the_limit():
     assert all(len(post) + 10 <= CHARACTER_LIMIT for post in posts)
 
 
-def test_register_saves_credentials(config, mastodon):
+SETUP = {"client_name": "RelaySMS", "redirect_uris": ["https://app/cb"]}
+
+
+def setup(inputs):
+    return MastodonAdapter.setup(SetupRequest(inputs))
+
+
+def test_setup_registers_the_app(mastodon):
     mastodon.post(
         "https://other.example/api/v1/apps",
         json={"client_id": "new", "client_secret": "s", "id": "9"},
     )
-    args = ["--name", "RelaySMS", "--redirect-uri", "https://app/cb"]
-    assert register.main([*args, "--base-url", "https://other.example/"]) == 0
-    saved = json.loads((config / "credentials.json").read_text())
-    assert saved == {
+
+    result = setup({**SETUP, "base_url": "https://other.example/"})
+
+    assert result.settings == {
         "client_id": "new",
         "client_secret": "s",
         "redirect_uris": ["https://app/cb"],
         "base_url": "https://other.example",
     }
-    assert MastodonAdapter().credentials.base_url == "https://other.example"
+    sent = json.loads(mastodon.calls[0].request.body)
+    assert sent.items() >= SETUP.items()
+
+
+def test_setup_reports_a_refused_app(mastodon):
+    mastodon.post(
+        "https://mastodon.social/api/v1/apps",
+        status=422,
+        json={"error": "Validation failed: Redirect URI must be an absolute URI."},
+    )
+
+    with pytest.raises(InvalidParamsError, match="Redirect URI"):
+        setup(SETUP)
+
+
+def test_setup_reports_an_unreachable_server(mastodon):
+    mastodon.post(
+        "https://mastodon.social/api/v1/apps", body=requests.ConnectionError("down")
+    )
+
+    with pytest.raises(UpstreamError, match="couldn't be reached"):
+        setup(SETUP)
+
+
+def test_adapter_toml_declares_every_setting():
+    declared = manifest.load(Path(__file__).parents[1]).config
+    assert {field.name for field in declared} == {
+        "client_id",
+        "client_secret",
+        "redirect_uris",
+        "base_url",
+        "scope",
+    }

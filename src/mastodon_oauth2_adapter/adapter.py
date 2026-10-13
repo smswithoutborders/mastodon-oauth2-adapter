@@ -21,6 +21,8 @@ from relaysms_adapter_sdk import (
     RevokeRequest,
     SendRequest,
     SendResult,
+    SetupRequest,
+    SetupResult,
     TokenInvalidError,
     UpstreamError,
 )
@@ -39,6 +41,32 @@ TIMEOUT = 30
 class MastodonAdapter(OAuth2Adapter):
     def __init__(self) -> None:
         self.credentials = credentials.load()
+
+    @override
+    @classmethod
+    def setup(cls, request: SetupRequest) -> SetupResult:
+        """Register the app with the Mastodon server."""
+        inputs = request.inputs
+        base_url = (inputs.get("base_url") or credentials.DEFAULT_BASE_URL).rstrip("/")
+        body = {
+            "client_name": inputs["client_name"],
+            "redirect_uris": inputs["redirect_uris"],
+            "scopes": " ".join(credentials.DEFAULT_SCOPE),
+        }
+        if inputs.get("website"):
+            body["website"] = inputs["website"]
+        response = _request("POST", f"{base_url}/api/v1/apps", json=body)
+        if response.status_code == 422:
+            raise InvalidParamsError(f"Mastodon refused the app: {_error(response)}")
+        app = _check(response).json()
+        return SetupResult(
+            {
+                "client_id": app["client_id"],
+                "client_secret": app["client_secret"],
+                "redirect_uris": inputs["redirect_uris"],
+                "base_url": base_url,
+            }
+        )
 
     @override
     def create_authorization_url(
@@ -129,13 +157,7 @@ class MastodonAdapter(OAuth2Adapter):
             "client_secret": self.credentials.client_secret,
             "token": access_token,
         }
-        try:
-            response = requests.post(
-                self._url("/oauth/revoke"), data=data, timeout=TIMEOUT
-            )
-        except requests.RequestException as e:
-            raise UpstreamError(f"Mastodon couldn't be reached: {e}") from e
-        _check(response)
+        _check(_request("POST", self._url("/oauth/revoke"), data=data))
         logger.info("Token revoked.")
 
     def _upload(self, token: dict[str, Any], attachment: Attachment) -> str:
@@ -147,13 +169,7 @@ class MastodonAdapter(OAuth2Adapter):
         self, method: str, path: str, token: dict[str, Any], **kwargs: Any
     ) -> requests.Response:
         headers = {"Authorization": f"Bearer {token['access_token']}"}
-        try:
-            response = requests.request(
-                method, self._url(path), headers=headers, timeout=TIMEOUT, **kwargs
-            )
-        except requests.RequestException as e:
-            raise UpstreamError(f"Mastodon couldn't be reached: {e}") from e
-        return _check(response)
+        return _check(_request(method, self._url(path), headers=headers, **kwargs))
 
     def _session(
         self, *, redirect_url: str | None = None, pkce: bool = False
@@ -176,6 +192,13 @@ def split_message(message: str) -> list[str]:
     posts = math.ceil(len(message) / (CHARACTER_LIMIT - THREAD_SUFFIX_RESERVE))
     width = math.ceil(len(message) / posts)
     return textwrap.wrap(message, width, break_long_words=False)
+
+
+def _request(method: str, url: str, **kwargs: Any) -> requests.Response:
+    try:
+        return requests.request(method, url, timeout=TIMEOUT, **kwargs)
+    except requests.RequestException as e:
+        raise UpstreamError(f"Mastodon couldn't be reached: {e}") from e
 
 
 def _check(response: requests.Response) -> requests.Response:
