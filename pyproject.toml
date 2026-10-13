@@ -23,9 +23,6 @@ dev = [
   "relaysms-adapter-sdk[console] @ git+https://github.com/smswithoutborders/RelaySMS-Publisher@sdk-v1.1.0#subdirectory=sdk",
 ]
 
-[project.scripts]
-mastodon-register = "mastodon_oauth2_adapter.register:main"
-
 [tool.hatch.metadata]
 allow-direct-references = true
 

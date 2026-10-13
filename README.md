@@ -2,21 +2,9 @@
 
 Lets [RelaySMS Publisher](https://github.com/smswithoutborders/RelaySMS-Publisher) users post to their Mastodon account. Long messages become a thread. Built with the [RelaySMS Adapter SDK](https://github.com/smswithoutborders/RelaySMS-Publisher/tree/main/sdk).
 
-## Credentials
+## Settings
 
-Register the client application with the Mastodon server once, from the Publisher's install directory. `mastodon-register` writes `credentials.json` to the adapter's config directory.
-
-```bash
-./publisher.sh platforms exec mastodon -- mastodon-register --name RelaySMS \
-  --redirect-uri https://example.com/callback --base-url https://mastodon.social
-```
-
-| Field | Required | Description |
-|---|---|---|
-| `client_id`, `client_secret` | yes | From the registration |
-| `redirect_uris` | yes | The first is the default redirect |
-| `base_url` | no | Mastodon server, `https://mastodon.social` by default |
-| `scope` | no | Scopes to request, `["profile", "write:statuses", "write:media"]` by default |
+Setup registers the app with the Mastodon server and saves the client ID and secret it gets back. Its inputs and settings are described in [adapter.toml](adapter.toml). On a Publisher, an administrator sets them with its [settings commands](https://github.com/smswithoutborders/RelaySMS-Publisher/blob/main/docs/platforms.md#settings) or REST API.
 
 ## Develop
 
@@ -26,10 +14,11 @@ venv/bin/pip install -e '.[dev]'
 venv/bin/pytest
 ```
 
-To try it against a server, register with a local redirect; without `RELAYSMS_ADAPTER_CONFIG_DIR` the credentials go to `.relaysms/config/`. The [`relaysms-adapter`](https://github.com/smswithoutborders/RelaySMS-Publisher/tree/main/sdk#try-it) console then links an account and posts.
+To try it against a server, register with a local redirect, then link an account and post with the [`relaysms-adapter`](https://github.com/smswithoutborders/RelaySMS-Publisher/tree/main/sdk#try-it) console:
 
 ```bash
-venv/bin/mastodon-register --name "RelaySMS dev" --redirect-uri http://localhost:8765/callback
+venv/bin/relaysms-adapter setup --input client_name="RelaySMS dev" \
+  --input redirect_uris=http://localhost:8765/callback
 venv/bin/relaysms-adapter link
 venv/bin/relaysms-adapter send --attach ./photo.png
 venv/bin/relaysms-adapter revoke

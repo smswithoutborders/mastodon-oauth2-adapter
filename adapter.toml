@@ -8,3 +8,39 @@ offline_first = false
 [icons]
 svg = "https://raw.githubusercontent.com/smswithoutborders/mastodon-oauth2-adapter/main/icons/mastodon.svg"
 png = "https://raw.githubusercontent.com/smswithoutborders/mastodon-oauth2-adapter/main/icons/mastodon.png"
+
+[config.client_id]
+required = true
+description = "The registered app's client ID."
+
+[config.client_secret]
+required = true
+secret = true
+description = "The registered app's client secret."
+
+[config.redirect_uris]
+type = "list"
+required = true
+description = "Redirect URIs registered for the app. The first is the default."
+
+[config.base_url]
+description = "Mastodon server the app is registered with. Default: https://mastodon.social."
+
+[config.scope]
+type = "list"
+description = "Scopes to request. Default: profile, write:statuses, write:media."
+
+[setup.client_name]
+required = true
+description = "App name shown on the server's consent page."
+
+[setup.redirect_uris]
+type = "list"
+required = true
+description = "Redirect URIs to register. The first is the default."
+
+[setup.website]
+description = "Homepage shown on the consent page."
+
+[setup.base_url]
+description = "Mastodon server to register with. Default: https://mastodon.social."

@@ -1,13 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """The client application registered with a Mastodon server."""
 
-import json
 from dataclasses import dataclass
-from typing import Any
 
-from relaysms_adapter_sdk import config_dir, read_config
+from relaysms_adapter_sdk import read_config
 
-FILENAME = "credentials.json"
 DEFAULT_BASE_URL = "https://mastodon.social"
 DEFAULT_SCOPE = ("profile", "write:statuses", "write:media")
 
@@ -42,11 +39,3 @@ def load() -> Credentials:
         base_url=raw.get("base_url", DEFAULT_BASE_URL).rstrip("/"),
         scope=tuple(raw.get("scope", DEFAULT_SCOPE)),
     )
-
-
-def save(data: dict[str, Any]) -> None:
-    """Write the registration Mastodon returned to credentials.json."""
-    path = config_dir() / FILENAME
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    path.chmod(0o600)
