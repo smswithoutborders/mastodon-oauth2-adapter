@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from relaysms_adapter_sdk import config_dir
+from relaysms_adapter_sdk import config_dir, read_config
 
 FILENAME = "credentials.json"
 DEFAULT_BASE_URL = "https://mastodon.social"
@@ -27,18 +27,13 @@ def load() -> Credentials:
     Raises:
         ValueError: The file is invalid.
     """
-    path = config_dir() / FILENAME
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        raise ValueError(f"{path} is not valid JSON: {e}") from e
-
+    raw = read_config()
     for key in ("client_id", "client_secret"):
         if not isinstance(raw.get(key), str) or not raw[key].strip():
-            raise ValueError(f"{key} in {path} must be a non-empty string.")
+            raise ValueError(f"{key} in credentials.json must be a non-empty string.")
     redirect_uris = raw.get("redirect_uris")
     if not isinstance(redirect_uris, list) or not redirect_uris:
-        raise ValueError(f"redirect_uris in {path} must be a non-empty list.")
+        raise ValueError("redirect_uris in credentials.json must be a non-empty list.")
 
     return Credentials(
         client_id=raw["client_id"],
