@@ -4,7 +4,7 @@ Lets [RelaySMS Publisher](https://github.com/smswithoutborders/RelaySMS-Publishe
 
 ## Settings
 
-Setup registers the app with the Mastodon server and saves the client ID and secret it gets back. Its inputs and settings are described in [adapter.toml](adapter.toml). On a Publisher, an administrator sets them with its [settings commands](https://github.com/smswithoutborders/RelaySMS-Publisher/blob/main/docs/platforms.md#settings) or REST API.
+Setup registers the app with the Mastodon server and saves the client ID and secret it gets back. Its inputs and settings are described in [adapter.toml](adapter.toml). On a Publisher, set them up as its [Mastodon guide](https://github.com/smswithoutborders/RelaySMS-Publisher/blob/main/docs/platforms/mastodon.md) describes.
 
 ## Develop
 
